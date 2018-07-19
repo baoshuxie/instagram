@@ -326,7 +326,10 @@ def main():
 			cursor.execute(modify_sen)
 		else:
 			url = 'https://www.instagram.com/graphql/query/?query_hash={}&variables=%7B%22id%22%3A%22{}%22%2C%22first%22%3A{}%7D'.format(photo_query_hash,user.id,first_count)
-			urls = get_photo_urls(url,user,[])
+			try:
+				urls = get_photo_urls(url,user,[])
+			except:
+				continue
 			save_photo_in_database(cursor,user,urls)
 			real_dir = create_dir(base_path,user)
 			save_photos(urls,real_dir)
@@ -334,7 +337,7 @@ def main():
 
 	browser.quit()
 	print('selenium已退出')
-	end_time = time.now()
+	end_time =datetime.now()
 	print('本程序于{}时启动,于{}时关闭'.format(start_time,end_time))
 
 main()
