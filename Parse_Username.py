@@ -267,7 +267,7 @@ def save_photos(photo_urls,real_dir):
 	for photo_url in photo_urls:
 		p=Pool()
 		for i in range(8):
-			p.apply_async(save,args=(urls,real_dir,))
+			p.apply_async(save,args=(photo_url,real_dir,=))
 		p.close()
 		p.join()
 		print('正在下载第%d张图片'%count)
