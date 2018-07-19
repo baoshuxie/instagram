@@ -13,6 +13,7 @@ from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import json 
 import pymysql
 import pymysql.cursors
+from multiprocessing import Pool
 
 #定义'关注的人'类,包含id,username,is_private三个属性
 class Follower(object):
@@ -28,6 +29,20 @@ class Person(Follower):
 		self.name = follower.name
 		self.followers = followers
 
+#定义头部
+def headers(url):
+	headers = {
+	"Origin": "https://www.instagram.com/",
+	"Referer": url,
+	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36",
+	"Host": "www.instagram.com",
+	"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+	"accept-encoding": "gzip, deflate, sdch, br",
+	"accept-language": "zh-CN,zh;q=0.8",
+	"X-Instragram-AJAX": "1",
+	"X-Requested-With": "XMLHttpRequest",
+	"Upgrade-Insecure-Requests": "1",
+	}
 
 #登录
 def login():
@@ -100,20 +115,23 @@ def get_next_page(url,followers):
 	global id
 
 	browser.get(url)
-	browser.implicitly_wait(1)
+	browser.implicitly_wait(3)
 	#page_count+=1
 	html= browser.page_source
 	#print(html)
 	html = html.split('>')[5].split('<')[0].strip()
-	print(html)
+	#print(html)
 	js = json.loads(html)
 	#count = js['data']['user']['edge_follow']['count']
+	if js['data']['user']== None:
+		print('%s无法解析'%url)
+
 	has_next_page = js['data']['user']['edge_follow']['page_info']['has_next_page']
-	print(has_next_page)
+	#print(has_next_page)
 	end_cursor = js['data']['user']['edge_follow']['page_info']['end_cursor'] 
 	nodes = js['data']['user']['edge_follow']['edges']
 	#print(nodes)
-	
+
 	for node in nodes:
 		follower_id = node['node']['id']
 		username = node['node']['username']
@@ -175,7 +193,89 @@ def modify_flag_add(cursor,user,person):
 			cursor.execute(add_follower)
 		print('正在向数据库中插入关注者%s的数据'%follower.name)
 
+#用来获取待爬取照片的用户列表
+def  get_user_to_parse_photos(cursor):
+	select_user = 'select follower_name,follower_id,is_private from followers where photo_parsed="0"'
+	cursor.execute(select_user)
+	result = cursor.fetchall()
+	print(result)
+	#构造一个数组,数组中的每一个元素是由 result 构造出来的 Follower 实例
+	toParsePhotoList = [Follower(x[0],x[1],x[2]) for x in result]
+	print('待爬取照片的用户有:')
+	for a in toParsePhotoList:
+		print(a.name)
+
+	return toParsePhotoList
+
+
+#用来访问照片的 json 网址以及下一页,访问所有的照片网址列表
+def get_photo_urls(url,user,photo_urls):
+	global browser
+	global photo_query_hash
+	global first_count
+	print(url)
+	browser.get(url)
+	browser.implicitly_wait(3)
+	html = browser.page_source
+	html = html.split('>')[5].split('<')[0].strip()
+	#print(html)
+	js = json.loads(html)
+	if js['data']['user']== None:
+		print('%s无法解析'%url)
+	has_next_page = js['data']['user']['edge_owner_to_timeline_media']['page_info']['has_next_page']
+	end_cursor = js['data']['user']['edge_owner_to_timeline_media']['page_info']['end_cursor']
+	nodes = js['data']['user']['edge_owner_to_timeline_media']['edges']
+	urls = [x['node']['display_url'] for x in nodes]
+	photo_urls += urls
+
+	if has_next_page == True:
+		next_url = 'https://www.instagram.com/graphql/query/?query_hash={}&variables=%7B%22id%22%3A%22{}%22%2C%22first%22%3A{}%2C%22after%22%3A%22{}%22%7D'.format(photo_query_hash,user.id,first_count,end_cursor)
+
+		get_photo_urls(next_url,user,photo_urls)
+
+	return photo_urls
+
+#将照片网址数据存入数据库
+def save_photo_in_database(cursor,user,photo_urls):
+	for photo_url in photo_urls:
+		insert_in = 'insert urls values("{}","{}","{}")'.format(user.name,user.id,photo_url)
+		cursor.execute(insert_in)
+
+#create_dir 中的方法,用于在指定目录不存在时创建该目录
+def make_dir(path):
+	if not os.path.exists(path):
+		os.mkdir(path)
+
+#创建用于保存照片的目录,注意 base_path 的末尾处不能带'/'
+def create_dir(base_path,user):
+	date = datetime.now()
+	dir_name = date.strftime('%b %d')
+	make_dir(base_path+'/'+dir_name)
+	make_dir(base_path+'/'+dir_name+'/'+user.name)
+	real_dir = base_path+'/'+dir_name+'/'+user.name
+	return real_dir
+
+def save(photo_url,real_dir):
+	suffix = os.path.splitext(photo_url)[1]
+	filename = os.path.splitext(photo_url)[0]
+	with open(real_dir+'/'+filename+'.'+suffix,'wb+') as f:
+		f.write(requests.get(photo_url,headers = headers(photo_url)).content)
+
+#保存图片, count 表明文件名, suffix是图片后缀
+def save_photos(photo_urls,real_dir):
+	count =1
+	for photo_url in photo_urls:
+		p=Pool()
+		for i in range(8):
+			p.apply_async(save,args=(urls,real_dir,))
+		p.close()
+		p.join()
+		print('正在下载第%d张图片'%count)
+
+		count += 1
+
 def main():
+	start_time = datetime.now()
 	#配置
 	service_args = [
 	'--proxy=http://127.0.0.1:1087',    # 代理 IP：port    （eg：192.168.0.28:808）
@@ -194,6 +294,9 @@ def main():
 	global browser
 	browser = webdriver.PhantomJS(service_args=service_args,desired_capabilities=dcap)
 	
+	global photo_query_hash
+	photo_query_hash = 'bd0d6d184eefd4d0ce7036c11ae58ed9'
+
 	login()
 	cursor = connect_db()
 	#user=Follower('luojunjie20','8091752170','false')
@@ -202,12 +305,37 @@ def main():
 		#print(toParse_user.name)
 		if toParse_user.is_private == 'True':
 			modify_flag = 'update followers set parsed="1" where follower_name="%s"'%toParse_user.name
+			cursor.execute(modify_flag)
 		else:
-			person = get_followers(toParse_user)
+			try:
+				person = get_followers(toParse_user)
+			except:
+				continue
+
 			modify_flag_add(cursor,toParse_user,person)
+
+	toParsePhotoList = get_user_to_parse_photos(cursor)
+
+	global first_count
+	first_count = 12
+
+	base_path='/Users/junjieluo/MyGit/instagram/instagram_photos'
+	for user in toParsePhotoList:
+		if user.is_private == 'True':
+			modify_sen = 'update followers set photo_parsed="1" where follower_name="%s"'%user.name
+			cursor.execute(modify_sen)
+		else:
+			url = 'https://www.instagram.com/graphql/query/?query_hash={}&variables=%7B%22id%22%3A%22{}%22%2C%22first%22%3A{}%7D'.format(photo_query_hash,user.id,first_count)
+			urls = get_photo_urls(url,user,[])
+			save_photo_in_database(cursor,user,urls)
+			real_dir = create_dir(base_path,user)
+			save_photos(urls,real_dir)
+
 
 	browser.quit()
 	print('selenium已退出')
+	end_time = time.now()
+	print('本程序于{}时启动,于{}时关闭'.format(start_time,end_time))
 
 main()
 	
