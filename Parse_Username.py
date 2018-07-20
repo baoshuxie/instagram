@@ -257,7 +257,7 @@ def create_dir(base_path,user):
 
 def save(photo_url,real_dir):
 	suffix = os.path.splitext(photo_url)[1]
-	filename = os.path.splitext(photo_url)[0]
+	filename = os.path.splitext(photo_url)[0].replace('/','_')
 	with open(real_dir+'/'+filename+'.'+suffix,'wb+') as f:
 		f.write(requests.get(photo_url,headers = headers(photo_url)).content)
 
