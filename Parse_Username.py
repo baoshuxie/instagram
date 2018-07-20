@@ -22,7 +22,7 @@ class Follower(object):
 		self.name = username
 		self.is_private = is_private
 
-#定义'人'类,继承自 follower, 不仅包含follower 原有的属性,还包括 count(关注者数量),page_count(关注的人有几页),followers(关注的人列表)
+#定义'人'类,继承自 follower, 不仅包含follower 原有的属性,还包括followers(关注的人列表)
 class Person(Follower):
 	def __init__(self,follower,followers):
 		self.id = follower.id
@@ -255,24 +255,22 @@ def create_dir(base_path,user):
 	real_dir = base_path+'/'+dir_name+'/'+user.name
 	return real_dir
 
-def save(photo_url,real_dir):
-	suffix = os.path.splitext(photo_url)[1]
-	filename = os.path.splitext(photo_url)[0].replace('/','_')
-	with open(real_dir+'/'+filename+'.'+suffix,'wb+') as f:
-		f.write(requests.get(photo_url,headers = headers(photo_url)).content)
 
 #保存图片, count 表明文件名, suffix是图片后缀
-def save_photos(photo_urls,real_dir):
-	count =1
-	for photo_url in photo_urls:
-		p=Pool()
-		for i in range(8):
-			p.apply_async(save,args=(photo_url,real_dir))
-		p.close()
-		p.join()
-		print('正在下载第%d张图片'%count)
+def save_photos(photo_url,real_dir):
+	suffix = os.path.splitext(photo_url)[1]
+	filename = os.path.basename(photo_url)
+	
+	try:
+		cont = requests.get(photo_url,headers= headers(photo_url),timeout=10).content
+		with open(real_dir+'/'+filename+'.'+suffix,'wb+') as f:
+			f.write(requests.get(photo_url,cont))
+	except:
+		print('一张图片未响应')
+		
+	print('正在下载图片')
+	
 
-		count += 1
 
 def main():
 	start_time = datetime.now()
@@ -319,6 +317,8 @@ def main():
 	global first_count
 	first_count = 12
 
+	global photo_count
+	photo_count = 0
 	base_path='/Users/junjieluo/MyGit/instagram/instagram_photos'
 	for user in toParsePhotoList:
 		if user.is_private == 'True':
@@ -332,7 +332,11 @@ def main():
 				continue
 			save_photo_in_database(cursor,user,urls)
 			real_dir = create_dir(base_path,user)
-			save_photos(urls,real_dir)
+			p=Pool()
+			for url in urls:
+				p.apply_async(save_photos,args =(url,real_dir))
+			p.close()
+			p.join()
 
 
 	browser.quit()
