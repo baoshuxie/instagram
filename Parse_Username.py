@@ -48,7 +48,7 @@ def headers(url):
 def login():
 	global browser
 	#完成登录以及数据库连接
-	browser.implicitly_wait(1)
+	browser.implicitly_wait(3)
 	browser.set_page_load_timeout(20)
 	browser.set_script_timeout(20)
 
@@ -101,6 +101,8 @@ def select_to_Parse(cursor):
 	print(result)
 	#构造一个数组,数组中的每一个元素是由 result 构造出来的 Follower 实例
 	toParseList = [Follower(x[0],x[1],x[2]) for x in result]
+
+
 	print('待爬取的用户有:')
 	for a in toParseList:
 		print(a.name)
@@ -258,16 +260,11 @@ def create_dir(base_path,user):
 
 #保存图片, count 表明文件名, suffix是图片后缀
 def save_photos(photo_url,real_dir):
+	print('图片网址为%s'%photo_url)
 	suffix = os.path.splitext(photo_url)[1]
 	filename = os.path.basename(photo_url)
-	
-	try:
-		cont = requests.get(photo_url,headers= headers(photo_url),timeout=10).content
-		with open(real_dir+'/'+filename+'.'+suffix,'wb+') as f:
-			f.write(requests.get(photo_url,cont))
-	except:
-		print('一张图片未响应')
-		
+	with open(real_dir+'/'+filename,'wb+') as f:
+		f.write(requests.get(photo_url,headers = headers(photo_url)).content)
 	print('正在下载图片')
 	
 
